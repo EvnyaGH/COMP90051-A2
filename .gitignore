@@ -1,0 +1,3 @@
+features/w2v.kv.vectors.npy
+imdb_balanced_10k.csv
+src/__pycache__/extract_features.cpython-312.pyc

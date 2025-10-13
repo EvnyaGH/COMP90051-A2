@@ -11,7 +11,7 @@ import pandas as pd
 import numpy as np
 
 # === 修改为你的本地路径（写法任选其一） ===
-SRC = Path(r"E:\sml\IMDB Dataset.csv")
+SRC = Path(r"本地路径\IMDB Dataset.csv")
 assert SRC.exists(), f"Source file not found: {SRC}"
 
 OUT_DIR = SRC.parent  # 输出到同一目录，也可改到自己项目的 data 目录
