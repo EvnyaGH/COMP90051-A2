@@ -21,12 +21,15 @@ import math
 import os
 from pathlib import Path
 import random
-from typing import List, Tuple, Dict
+from typing import List, Tuple, Dict, Optional, Any
+from dataclasses import dataclass
+import regex as re
 
 import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
+import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 from torch.nn.utils.rnn import pad_sequence
 
@@ -49,10 +52,10 @@ def set_seed(seed: int = 42):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
+_TOKEN_RE = re.compile(r"\b\w[\w'-]*\b")
 
-def simple_tokenize(text: str) -> List[str]:
-    # Data has been cleaned (lowercased, normalized) in prepare_dataset.py, so whitespace split is adequate.
-    return text.strip().split()
+def _tokenize(s: str) -> List[str]:
+    return _TOKEN_RE.findall(s)
 
 
 def build_vocab(texts: List[str], min_freq: int = 2, max_size: int = 50000) -> Tuple[Dict[str, int], Dict[int, str], Dict[str, int]]:
@@ -60,7 +63,7 @@ def build_vocab(texts: List[str], min_freq: int = 2, max_size: int = 50000) -> T
     from collections import Counter
     counter = Counter()
     for t in texts:
-        counter.update(simple_tokenize(t))
+        counter.update(_tokenize(t))
     # Special tokens
     specials = ['<pad>', '<unk>']
     # Sort by frequency then alphabetically for stability
@@ -75,7 +78,7 @@ def build_vocab(texts: List[str], min_freq: int = 2, max_size: int = 50000) -> T
 
 def encode(text: str, tok2idx: Dict[str, int]) -> torch.LongTensor:
     unk = tok2idx.get('<unk>', 1)
-    ids = [tok2idx.get(tok, unk) for tok in simple_tokenize(text)]
+    ids = [tok2idx.get(tok, unk) for tok in _tokenize(text)]
     if len(ids) == 0:
         ids = [unk]
     return torch.LongTensor(ids)
