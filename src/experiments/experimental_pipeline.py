@@ -427,6 +427,52 @@ class ExperimentalPipeline:
         # Save summary
         self._save_summary()
 
+    def _save_summary(self):
+        """Save a summary of the experiment results."""
+        summary = {
+            "experiment_info": {
+                "timestamp": datetime.now().isoformat(),
+                "fast_mode": self.fast,
+                "random_state": self.random_state,
+                "data_size": len(self.data) if self.data is not None else 0,
+            },
+            "model_performance": {},
+            "best_hyperparameters": {},
+        }
+
+        # Add hyperparameter tuning results
+        if "hyperparameter_tuning" in self.results:
+            for model_name, results in self.results["hyperparameter_tuning"].items():
+                if "cv_results" in results and results["cv_results"] is not None:
+                    summary["model_performance"][model_name] = {
+                        "mean_cv_score": results["cv_results"]["mean_cv_score"],
+                        "std_cv_score": results["cv_results"]["std_cv_score"],
+                        "best_params": results["cv_results"]["best_params"],
+                    }
+                    summary["best_hyperparameters"][model_name] = results["cv_results"][
+                        "best_params"
+                    ]
+
+        # Add learning curve results
+        if "learning_curves" in self.results:
+            summary["learning_curves"] = {}
+            for model_name, results in self.results["learning_curves"].items():
+                if "error" not in results and results.get("scores"):
+                    summary["learning_curves"][model_name] = {
+                        "final_score": (
+                            results["scores"][-1] if results["scores"] else None
+                        ),
+                        "training_sizes": results.get("training_sizes", []),
+                        "scores": results.get("scores", []),
+                    }
+
+        # Save summary
+        summary_path = self.results_dir / "experiment_summary.json"
+        with open(summary_path, "w") as f:
+            json.dump(summary, f, indent=2)
+
+        print(f"Summary saved to: {summary_path}")
+
     def run_complete_pipeline(self):
         """Run the complete experimental pipeline."""
         try:
@@ -437,7 +483,7 @@ class ExperimentalPipeline:
             self.run_hyperparameter_tuning()
 
             # Step 4: Run learning curve experiments
-            self.run_learning_curves()
+            # self.run_learning_curves()
 
             # Step 5: Create visualizations
             self.create_visualizations()
