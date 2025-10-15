@@ -36,8 +36,22 @@ from prepare_dataset import main as prepare_data
 from models.logistic_regression import create_logistic_regression_factory
 from models.electra_sentiment import create_electra_factory
 from models.bilstm_sentiment import create_bilstm_factory
-from .hyperparameter_tuning import HyperparameterTuner, HYPERPARAMETER_GRIDS
-from .learning_curves import LearningCurveExperiment
+
+try:
+    from .hyperparameter_tuning import (
+        HyperparameterTuner,
+        HYPERPARAMETER_GRIDS,
+        HYPERPARAMETER_GRIDS_FAST,
+    )
+    from .learning_curves import LearningCurveExperiment
+except ImportError:
+    # Fallback for direct script execution
+    from hyperparameter_tuning import (
+        HyperparameterTuner,
+        HYPERPARAMETER_GRIDS,
+        HYPERPARAMETER_GRIDS_FAST,
+    )
+    from learning_curves import LearningCurveExperiment
 
 
 class ExperimentalPipeline:
@@ -53,7 +67,9 @@ class ExperimentalPipeline:
         data_dir: str = "data",
         results_dir: str = "results",
         random_state: int = 42,
+        fast: bool = False,
     ):
+        self.fast = fast
         """
         Initialize experimental pipeline.
 
@@ -78,10 +94,11 @@ class ExperimentalPipeline:
         ]
 
         # Hyperparameter grids
+        grids = HYPERPARAMETER_GRIDS_FAST if self.fast else HYPERPARAMETER_GRIDS
         self.hyperparams = {
-            "logreg": HYPERPARAMETER_GRIDS["logistic_regression"],
-            "bilstm": HYPERPARAMETER_GRIDS["bilstm"],
-            "electra": HYPERPARAMETER_GRIDS["electra"],
+            "logreg": grids["logistic_regression"],
+            "bilstm": grids["bilstm"],
+            "electra": grids["electra"],
         }
 
     def load_and_prepare_data(self):
@@ -174,12 +191,16 @@ class ExperimentalPipeline:
         X_text = self.data["text"].tolist()
         y = self.data["label"].to_numpy()
 
+        outer = 3 if self.fast else 10
+        inner = 2 if self.fast else 3
+
         # Create hyperparameter tuner
         tuner = HyperparameterTuner(
-            outer_folds=10,
-            inner_folds=3,
+            outer_folds=outer,
+            inner_folds=inner,
             random_state=self.random_state,
             scoring_func=f1_score,
+            fast=self.fast,
         )
 
         # Prepare experiments
@@ -430,7 +451,7 @@ class ExperimentalPipeline:
 
 def main():
     """Main function to run the complete experimental pipeline."""
-    pipeline = ExperimentalPipeline()
+    pipeline = ExperimentalPipeline(fast=True)
     pipeline.run_complete_pipeline()
 
 

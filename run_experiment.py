@@ -10,12 +10,23 @@ across increasing model complexity levels (LogReg, BiLSTM, ELECTRA) for sentimen
 Usage:
     python run_experiment.py
 
+    # Fast mode
+    python run_experiment.py --fast
+
+    # Custom settings
+    python run_experiment.py --fast --data-dir data --results-dir results_fast
+
 The script will:
 1. Load and prepare the IMDB dataset
-2. Extract TF-IDF, Word2Vec, and ELECTRA features
-3. Run 10-fold cross-validation with hyperparameter tuning for each model
-4. Generate learning curves for each model
-5. Create visualizations and save results
+2. Run cross-validation with hyperparameter tuning for each model
+3. Generate learning curves for each model
+4. Create visualizations and save results
+
+Fast mode uses:
+- Reduced dataset (10k samples)
+- Fewer CV folds (3 outer, 2 inner)
+- Minimal hyperparameters
+- Shorter training epochs
 """
 
 import sys
@@ -29,6 +40,26 @@ from experiments.experimental_pipeline import ExperimentalPipeline
 
 def main():
     """Run the complete experimental pipeline."""
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--fast",
+        action="store_true",
+        help="Run in fast mode (reduced dataset, fewer CV folds, minimal hyperparameters)",
+    )
+    parser.add_argument(
+        "--data-dir", default="data", help="Directory containing dataset files"
+    )
+    parser.add_argument(
+        "--results-dir", default="results", help="Directory to save results"
+    )
+    parser.add_argument(
+        "--random-state", type=int, default=42, help="Random seed for reproducibility"
+    )
+
+    args = parser.parse_args()
+
     print("=" * 80)
     print("SENTIMENT CLASSIFICATION RESEARCH EXPERIMENT")
     print("=" * 80)
@@ -40,8 +71,20 @@ def main():
     print()
     print("=" * 80)
 
+    if args.fast:
+        print("FAST MODE ENABLED")
+    else:
+        print("FULL MODE")
+
+    print("=" * 80)
+
     # Create and run experimental pipeline
-    pipeline = ExperimentalPipeline()
+    pipeline = ExperimentalPipeline(
+        data_dir=args.data_dir,
+        results_dir=args.results_dir,
+        random_state=args.random_state,
+        fast=args.fast,
+    )
 
     try:
         pipeline.run_complete_pipeline()

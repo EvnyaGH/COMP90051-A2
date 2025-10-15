@@ -23,22 +23,38 @@ from typing import Dict, Any, Optional, Union, List
 
 ArrayLike = Union[np.ndarray, List[str], spmatrix]
 
+
 class LogisticRegressionSentiment:
     def __init__(self, **params):
         self.params = params
         self.model: Optional[LogisticRegression] = None
         self.vectorizer: Optional[TfidfVectorizer] = None
 
-
     def _ensure_vectorized(self, X: ArrayLike, fit: bool = False):
         # If X is list/np array of strings -> vectorize; else pass through (assume sparse/ndarray)
-        if isinstance(X, list) and (len(X)==0 or isinstance(X[0], str)) \
-           or (isinstance(X, np.ndarray) and X.dtype==object and X.size>0 and isinstance(X[0], str)):
+        if (
+            isinstance(X, list)
+            and (len(X) == 0 or isinstance(X[0], str))
+            or (
+                isinstance(X, np.ndarray)
+                and X.dtype == object
+                and X.size > 0
+                and isinstance(X[0], str)
+            )
+        ):
             if self.vectorizer is None:
                 if not fit:
-                    raise ValueError("Vectorizer not fitted yet. Call fit() or pass vectorized features.")
-                self.vectorizer = TfidfVectorizer(max_features=50000, ngram_range=(1,2),
-                                                  min_df=2, sublinear_tf=True)
+                    raise ValueError(
+                        "Vectorizer not fitted yet. Call fit() or pass vectorized features."
+                    )
+                max_feat = self.params.get("tfidf_max_features", 50000)
+                ngram = self.params.get("tfidf_ngram", (1, 2))
+                self.vectorizer = TfidfVectorizer(
+                    max_features=max_feat,
+                    ngram_range=ngram,
+                    min_df=2,
+                    sublinear_tf=True,
+                )
                 X_vec = self.vectorizer.fit_transform(X)
             else:
                 X_vec = self.vectorizer.transform(X)
@@ -48,8 +64,13 @@ class LogisticRegressionSentiment:
     def fit(self, X: ArrayLike, y: np.ndarray):
         Xv = self._ensure_vectorized(X, fit=True)
 
-        # Create and train model
-        self.model = LogisticRegression(**self.params, random_state=42)
+        # Create and train model - filter out TF-IDF specific parameters
+        lr_params = {
+            k: v
+            for k, v in self.params.items()
+            if k not in ["tfidf_max_features", "tfidf_ngram"]
+        }
+        self.model = LogisticRegression(**lr_params, random_state=42)
         self.model.fit(Xv, y)
         return self
 

@@ -34,6 +34,8 @@ HYPERPARAMETER_GRIDS: Dict[str, Dict[str, List[Any]]] = {
         "C": [0.1, 1.0, 10.0],
         "solver": ["liblinear"],
         "max_iter": [1000],
+        "tfidf_max_features": [50000],
+        "tfidf_ngram": [(1,2)],
     },
     "bilstm": {
         "hidden_dim": [64, 128, 256],
@@ -41,6 +43,7 @@ HYPERPARAMETER_GRIDS: Dict[str, Dict[str, List[Any]]] = {
         "max_len": [256],
         "epochs": [6],
         "batch_size": [64],
+        "lr": [1e-3],
         "dropout": [0.3],
     },
     "electra": {
@@ -48,6 +51,31 @@ HYPERPARAMETER_GRIDS: Dict[str, Dict[str, List[Any]]] = {
         "epochs": [3],
         "batch_size": [32],
         "max_len": [128],
+    },
+}
+HYPERPARAMETER_GRIDS_FAST = {
+    "logistic_regression": {
+        "C": [0.1, 1.0, 10.0],
+        "solver": ["liblinear"],
+        "max_iter": [500],
+        "tfidf_max_features": [20000],
+        "tfidf_ngram": [(1,1)],
+    },
+    "bilstm": {
+        "hidden_dim": [64, 128, 256],
+        "embedding_dim": [100],
+        "max_len": [192],
+        "epochs": [2],
+        "batch_size": [64],
+        "lr": [1e-3],
+        "dropout": [0.3],
+    },
+    "electra": {
+        "learning_rate": [2e-5, 3e-5, 5e-5],
+        "epochs": [1],
+        "batch_size": [32],
+        "max_len": [96],
+        "model_name": ["google/electra-small-discriminator"],
     },
 }
 
@@ -66,6 +94,7 @@ class HyperparameterTuner:
         inner_folds: int = 3,
         random_state: int = 42,
         scoring_func: Callable = f1_score,
+        fast: bool = False,
     ):
         """
         Initialize hyperparameter tuner.
@@ -80,6 +109,7 @@ class HyperparameterTuner:
         self.inner_folds = inner_folds
         self.random_state = random_state
         self.scoring_func = scoring_func
+        self.fast = fast
 
         # Create CV framework
         self.outer_cv, self.inner_cv = create_cv_framework(
@@ -310,7 +340,7 @@ def create_hyperparameter_tuner(
 if __name__ == "__main__":
     from sklearn.datasets import make_classification
     from sklearn.model_selection import train_test_split
-    from logistic_regression import (
+    from src.models.logistic_regression import (
         LogisticRegressionSentiment,
         create_logistic_regression_factory,
     )
