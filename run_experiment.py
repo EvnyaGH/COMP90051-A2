@@ -35,7 +35,7 @@ from pathlib import Path
 # Add src directory to path
 sys.path.append(str(Path(__file__).parent / "src"))
 
-from experiments.experimental_pipeline import ExperimentalPipeline
+from src.experiments.experimental_pipeline import ExperimentalPipeline
 
 
 def main():

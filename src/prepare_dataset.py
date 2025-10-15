@@ -82,7 +82,7 @@ def main():
 
     df["text"] = df["text"].map(normalize_text)
 
-    clean_path = outdir / "interim" / "imdb_clean.csv"
+    clean_path = outdir / "imdb_clean.csv"
     clean_path.parent.mkdir(parents=True, exist_ok=True)
     df[["text","label"]].to_csv(clean_path, index=False, encoding="utf-8")
 

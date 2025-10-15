@@ -451,7 +451,7 @@ class ExperimentalPipeline:
 
 def main():
     """Main function to run the complete experimental pipeline."""
-    pipeline = ExperimentalPipeline(fast=True)
+    pipeline = ExperimentalPipeline(fast=False)
     pipeline.run_complete_pipeline()
 
 
