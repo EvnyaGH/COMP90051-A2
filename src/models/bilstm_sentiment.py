@@ -28,12 +28,16 @@ from torch.utils.data import Dataset, DataLoader
 
 _TOKEN_RE = re.compile(r"\b\w[\w'-]*\b")
 
+
 def _tokenize(s: str) -> List[str]:
     return _TOKEN_RE.findall(s)
 
 
-def _build_vocab(train_texts: List[str], min_freq: int = 1, max_size: Optional[int] = None) -> Dict[str, int]:
+def _build_vocab(
+    train_texts: List[str], min_freq: int = 1, max_size: Optional[int] = None
+) -> Dict[str, int]:
     from collections import Counter
+
     cnt = Counter()
     for t in train_texts:
         cnt.update(_tokenize(t))
@@ -76,6 +80,7 @@ def _load_glove(glove_path: str, dim: int, vocab: Dict[str, int]) -> np.ndarray:
 
 def _train_w2v(train_texts: List[str], dim: int, vocab: Dict[str, int]) -> np.ndarray:
     from gensim.models import Word2Vec
+
     toks = [_tokenize(t) for t in train_texts]
     w2v = Word2Vec(sentences=toks, vector_size=dim, min_count=1, workers=4, seed=42)
     rng = np.random.default_rng(42)
@@ -90,12 +95,14 @@ def _train_w2v(train_texts: List[str], dim: int, vocab: Dict[str, int]) -> np.nd
 
 # ---------------- Dataset ----------------
 
+
 class SeqDataset(Dataset):
     def __init__(self, ids: np.ndarray, labels: np.ndarray):
         self.ids = torch.tensor(ids, dtype=torch.long)
         self.labels = torch.tensor(labels, dtype=torch.long)
 
-    def __len__(self): return self.ids.size(0)
+    def __len__(self):
+        return self.ids.size(0)
 
     def __getitem__(self, idx):
         return self.ids[idx], self.labels[idx]
@@ -103,28 +110,48 @@ class SeqDataset(Dataset):
 
 # ---------------- Model ----------------
 
+
 class BiLSTMClassifier(nn.Module):
-    def __init__(self, vocab_size: int, embedding_dim: int, hidden_dim: int,
-                 num_layers: int = 1, dropout: float = 0.3, embeddings: Optional[np.ndarray] = None):
+    def __init__(
+        self,
+        vocab_size: int,
+        embedding_dim: int,
+        hidden_dim: int,
+        num_layers: int = 1,
+        dropout: float = 0.3,
+        embeddings: Optional[np.ndarray] = None,
+    ):
         super().__init__()
-        self.emb = nn.Embedding(vocab_size, embedding_dim, padding_idx=0)
+        self.pad_idx = 0  # Define padding index
+        self.emb = nn.Embedding(vocab_size, embedding_dim, padding_idx=self.pad_idx)
         if embeddings is not None:
             self.emb.weight.data.copy_(torch.from_numpy(embeddings))
-        self.lstm = nn.LSTM(embedding_dim, hidden_dim, num_layers=num_layers,
-                            batch_first=True, bidirectional=True, dropout=dropout if num_layers > 1 else 0.0)
+        self.lstm = nn.LSTM(
+            embedding_dim,
+            hidden_dim,
+            num_layers=num_layers,
+            batch_first=True,
+            bidirectional=True,
+            dropout=dropout if num_layers > 1 else 0.0,
+        )
         self.dropout = nn.Dropout(dropout)
         self.fc = nn.Linear(hidden_dim * 2, 2)
 
     def forward(self, x):
+        mask = (x != self.pad_idx).unsqueeze(-1)
         e = self.emb(x)
         o, _ = self.lstm(e)
-        # last timestep
-        h = o[:, -1, :]
+        o = o * mask  # zero-out PAD positions
+        sum_h = o.sum(dim=1)  # [B, 2H]
+        len_h = mask.sum(dim=1).clamp(min=1)  # [B, 1]
+        h = sum_h / len_h  # masked mean
         h = self.dropout(h)
-        return self.fc(h)
+        logits = self.fc(h)
+        return logits
 
 
 # ---------------- Estimator (sklearn-like) ----------------
+
 
 @dataclass
 class _Params:
@@ -137,7 +164,7 @@ class _Params:
     batch_size: int = 64
     epochs: int = 6
     glove_path: Optional[str] = None
-    use_w2v: bool = False
+    use_w2v: bool = True
     min_freq: int = 1
     max_vocab_size: Optional[int] = None
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
@@ -145,6 +172,7 @@ class _Params:
 
 class BiLSTMSentiment:
     """Estimator wrapper for nested CV."""
+
     def __init__(self, **kwargs):
         self.params = _Params(**{**_Params().__dict__, **kwargs})
         self.vocab: Optional[Dict[str, int]] = None
@@ -154,7 +182,9 @@ class BiLSTMSentiment:
     def fit(self, X_texts: List[str], y: np.ndarray):
         p = self.params
         # Build vocab on TRAIN ONLY
-        self.vocab = _build_vocab(X_texts, min_freq=p.min_freq, max_size=p.max_vocab_size)
+        self.vocab = _build_vocab(
+            X_texts, min_freq=p.min_freq, max_size=p.max_vocab_size
+        )
         # Encode
         train_ids = _texts_to_ids(X_texts, self.vocab, p.max_len)
         # Embeddings
@@ -164,7 +194,9 @@ class BiLSTMSentiment:
             emb = _train_w2v(X_texts, p.embedding_dim, self.vocab)
         else:
             rng = np.random.default_rng(42)
-            emb = rng.uniform(-0.05, 0.05, size=(len(self.vocab), p.embedding_dim)).astype(np.float32)
+            emb = rng.uniform(
+                -0.05, 0.05, size=(len(self.vocab), p.embedding_dim)
+            ).astype(np.float32)
 
         # Model
         self.model = BiLSTMClassifier(
@@ -173,7 +205,7 @@ class BiLSTMSentiment:
             hidden_dim=p.hidden_dim,
             num_layers=p.num_layers,
             dropout=p.dropout,
-            embeddings=emb
+            embeddings=emb,
         ).to(p.device)
 
         ds = SeqDataset(train_ids, y)
@@ -184,7 +216,8 @@ class BiLSTMSentiment:
         self.model.train()
         for _ in range(p.epochs):
             for xb, yb in dl:
-                xb = xb.to(p.device); yb = yb.to(p.device)
+                xb = xb.to(p.device)
+                yb = yb.to(p.device)
                 opt.zero_grad()
                 logits = self.model(xb)
                 loss = criterion(logits, yb)
@@ -199,7 +232,9 @@ class BiLSTMSentiment:
         p = self.params
         self.model.eval()
         ids = _texts_to_ids(X_texts, self.vocab, p.max_len)
-        dl = DataLoader(SeqDataset(ids, np.zeros(len(ids), dtype=np.int64)), batch_size=p.batch_size)
+        dl = DataLoader(
+            SeqDataset(ids, np.zeros(len(ids), dtype=np.int64)), batch_size=p.batch_size
+        )
         all_logits = []
         for xb, _ in dl:
             logits = self.model(xb.to(p.device))
@@ -229,11 +264,14 @@ class BiLSTMSentiment:
 
 # ---------------- Factory ----------------
 
+
 def create_bilstm_factory(hyperparams: dict):
     """
     Returns a callable that, given a hyperparam dict from the tuner,
     instantiates a BiLSTMSentiment with those params.
     """
+
     def factory(param_choice: dict):
         return BiLSTMSentiment(**param_choice)
+
     return factory
