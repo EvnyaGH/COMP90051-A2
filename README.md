@@ -110,13 +110,33 @@ This will execute the full experimental pipeline:
 To detect overfitting and get realistic performance estimates:
 
 ```bash
-# Run test set evaluation
+# Run test set evaluation (uses most recent experiment results)
 python run_test_evaluation.py
+
+# Specify custom data path
+python run_test_evaluation.py --data-path "data/imdb_clean.csv"
+
+# Use specific results file
+python run_test_evaluation.py --results-file "experiment_results_20250115_123456.json"
+
+# Custom test split and random seed
+python run_test_evaluation.py --test-size 0.3 --random-state 123
+
+# Custom results directory
+python run_test_evaluation.py --results-dir "custom_results"
 ```
+
+#### Command Line Arguments
+
+- `--data-path`: Path to clean dataset file (default: "data/imdb_clean.csv")
+- `--results-dir`: Directory containing experiment results (default: "results")
+- `--results-file`: Specific results file to use (default: most recent experiment*results*\*.json)
+- `--test-size`: Fraction of data to use for testing (default: 0.2)
+- `--random-state`: Random seed for reproducibility (default: 42)
 
 This will:
 
-1. Split data into train/test sets (80/20)
+1. Split data into train/test sets (80/20 by default)
 2. Train models on train set with best CV parameters
 3. Evaluate on test set
 4. Compare train vs test performance to detect overfitting

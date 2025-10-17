@@ -234,11 +234,21 @@ def main():
     data = pd.read_csv(data_path)
     print(f"Loaded dataset: {len(data)} samples")
 
-    # Load CV results
-    results_path = Path("results/experiment_results_20251015_225601.json")
-    if not results_path.exists():
-        print("CV results not found. Please run hyperparameter tuning first.")
+    # Load CV results - find the most recent experiment results file
+    results_dir = Path("results")
+    if not results_dir.exists():
+        print("Results directory not found. Please run hyperparameter tuning first.")
         return
+
+    # Find the most recent experiment results file
+    experiment_files = list(results_dir.glob("experiment_results_*.json"))
+    if not experiment_files:
+        print("No experiment results found. Please run hyperparameter tuning first.")
+        return
+
+    # Sort by modification time and get the most recent
+    results_path = max(experiment_files, key=lambda p: p.stat().st_mtime)
+    print(f"Loading CV results from: {results_path}")
 
     with open(results_path, "r") as f:
         cv_results = json.load(f)

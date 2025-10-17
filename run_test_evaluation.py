@@ -13,6 +13,41 @@ import json
 
 
 def main():
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Run test set evaluation to detect overfitting"
+    )
+    parser.add_argument(
+        "--data-path",
+        default="data/imdb_clean.csv",
+        help="Path to clean dataset file (default: data/imdb_clean.csv)",
+    )
+    parser.add_argument(
+        "--results-dir",
+        default="results",
+        help="Directory containing experiment results (default: results)",
+    )
+    parser.add_argument(
+        "--results-file",
+        default=None,
+        help="Specific results file to use (default: most recent experiment_results_*.json)",
+    )
+    parser.add_argument(
+        "--test-size",
+        type=float,
+        default=0.2,
+        help="Fraction of data to use for testing (default: 0.2)",
+    )
+    parser.add_argument(
+        "--random-state",
+        type=int,
+        default=42,
+        help="Random seed for reproducibility (default: 42)",
+    )
+
+    args = parser.parse_args()
+
     print("=" * 80)
     print("TEST SET EVALUATION - DETECTING OVERFITTING")
     print("=" * 80)
@@ -24,9 +59,9 @@ def main():
     print("=" * 80)
 
     # Load data
-    data_path = Path("data/imdb_clean.csv")
+    data_path = Path(args.data_path)
     if not data_path.exists():
-        print("Dataset not found at data/imdb_clean.csv")
+        print(f"Dataset not found at {data_path}")
         print("Please run data preparation first.")
         return
 
@@ -34,11 +69,30 @@ def main():
     print(f"Loaded dataset: {len(data)} samples")
 
     # Load CV results
-    results_path = Path("results/experiment_results_20251015_225601.json")
-    if not results_path.exists():
-        print("CV results not found.")
+    results_dir = Path(args.results_dir)
+    if not results_dir.exists():
+        print(f"Results directory not found: {results_dir}")
         print("Please run hyperparameter tuning first.")
         return
+
+    if args.results_file:
+        # Use specific results file
+        results_path = results_dir / args.results_file
+        if not results_path.exists():
+            print(f"Specified results file not found: {results_path}")
+            return
+    else:
+        # Find the most recent experiment results file
+        experiment_files = list(results_dir.glob("experiment_results_*.json"))
+        if not experiment_files:
+            print("No experiment results found.")
+            print("Please run hyperparameter tuning first.")
+            return
+
+        # Sort by modification time and get the most recent
+        results_path = max(experiment_files, key=lambda p: p.stat().st_mtime)
+
+    print(f"Loading CV results from: {results_path}")
 
     with open(results_path, "r") as f:
         cv_results = json.load(f)
@@ -46,8 +100,8 @@ def main():
     print(f"Loaded CV results")
 
     # Create evaluator and split data
-    print("\nSplitting data into train/test sets...")
-    evaluator = TestEvaluator(test_size=0.2, random_state=42)
+    print(f"\nSplitting data into train/test sets (test_size={args.test_size})...")
+    evaluator = TestEvaluator(test_size=args.test_size, random_state=args.random_state)
     train_data, test_data = evaluator.split_data(data)
 
     # Evaluate all models
