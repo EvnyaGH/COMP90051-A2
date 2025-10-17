@@ -31,7 +31,7 @@ from pathlib import Path
 
 HYPERPARAMETER_GRIDS: Dict[str, Dict[str, List[Any]]] = {
     "logistic_regression": {
-        "C": [1.0, 10.0, 100.0],
+        "C": [0.1, 1.0, 10.0],
         "solver": ["liblinear"],
         "tfidf_max_features": [10000],
         "tfidf_ngram": [(1, 1)],
@@ -40,11 +40,12 @@ HYPERPARAMETER_GRIDS: Dict[str, Dict[str, List[Any]]] = {
         "hidden_dim": [64, 128, 256],
         "embedding_dim": [100],
         "lr": [1e-3],
-        "dropout": [0.3],
+        "batch_size": [64],
+        "dropout": [0.5],
     },
     "electra": {
         "learning_rate": [3e-5, 5e-5, 7e-5],
-        "epochs": [3],
+        "epochs": [2],
         "batch_size": [32],
     },
 }
