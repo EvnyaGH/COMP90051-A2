@@ -69,6 +69,7 @@ class ExperimentalPipeline:
         random_state: int = 42,
         fast: bool = False,
         include_learning_curves: bool = False,
+        raw_data_path: str = None,
     ):
         self.fast = fast
         self.include_learning_curves = include_learning_curves
@@ -78,12 +79,15 @@ class ExperimentalPipeline:
         Args:
             data_dir: Directory containing dataset files
             results_dir: Directory to save results
-            features_dir: Directory to save/load features
             random_state: Random seed for reproducibility
+            fast: Whether to run in fast mode
+            include_learning_curves: Whether to include learning curves
+            raw_data_path: Path to raw IMDB Dataset.csv file
         """
         self.data_dir = Path(data_dir)
         self.results_dir = Path(results_dir)
         self.random_state = random_state
+        self.raw_data_path = raw_data_path or str(self.data_dir / "IMDB Dataset.csv")
         self.results_dir.mkdir(exist_ok=True)
         self.data: pd.DataFrame | None = None
         self.results: Dict[str, Any] = {}
@@ -109,13 +113,32 @@ class ExperimentalPipeline:
         print("STEP 1: Loading and Preparing Data")
         print("=" * 60)
 
-        # Check if clean data exists
-        clean_path = self.data_dir / "imdb_clean.csv"
-        if not clean_path.exists():
-            print("[info] Clean file not found; preparing dataset...")
-            prepare_data()
+        # Check if raw data exists
+        raw_path = Path(self.raw_data_path)
+        if not raw_path.exists():
+            raise FileNotFoundError(f"Raw data file not found: {self.raw_data_path}")
+
+        # Always prepare dataset from raw data
+        print(f"[info] Preparing dataset from raw data: {self.raw_data_path}")
+
+        # Import and call prepare_dataset function directly
+        from prepare_dataset import prepare_dataset
+
+        meta = prepare_dataset(
+            src_path=self.raw_data_path,
+            outdir=self.data_dir,
+            create_10k_subset=True,
+            random_state=self.random_state,
+        )
+
+        print("[info] Dataset preparation completed successfully")
+        print(
+            f"[info] Processed {meta['final_rows']} rows, dropped {meta['dropped_rows']} rows"
+        )
+        print(f"[info] Class balance: {meta['class_balance_full']}")
 
         # Load clean data
+        clean_path = self.data_dir / "imdb_clean.csv"
         self.data = pd.read_csv(clean_path)
         print(
             f"[data] rows={len(self.data)}, balance={self.data['label'].value_counts().to_dict()}"
@@ -135,8 +158,8 @@ class ExperimentalPipeline:
         X_text = self.data["text"].tolist()
         y = self.data["label"].to_numpy()
 
-        outer = 3# if self.fast else 5
-        inner = 2# if self.fast else 3
+        outer = 3  # if self.fast else 5
+        inner = 2  # if self.fast else 3
 
         # Create hyperparameter tuner
         tuner = HyperparameterTuner(

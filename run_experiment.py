@@ -62,6 +62,11 @@ def main():
     parser.add_argument(
         "--random-state", type=int, default=42, help="Random seed for reproducibility"
     )
+    parser.add_argument(
+        "--raw-data-path",
+        default="data/IMDB Dataset.csv",
+        help="Path to raw IMDB Dataset.csv file",
+    )
 
     args = parser.parse_args()
 
@@ -89,6 +94,8 @@ def main():
         results_dir=args.results_dir,
         random_state=args.random_state,
         fast=args.fast,
+        include_learning_curves=args.include_learning_curves,
+        raw_data_path=args.raw_data_path,
     )
 
     try:
