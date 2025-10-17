@@ -1,278 +1,139 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-"""
-ELECTRA Fine-tuning Implementation for Sentiment Classification
+# electra_sentiment.py
+from typing import Any, Dict, List
 
-This module implements ELECTRA fine-tuning for sentiment classification that works
-with our cross-validation framework.
-
-Features:
-- Uses pre-trained ELECTRA model
-- Fine-tunes on sentiment classification task
-- Compatible with our CV framework
-- Handles text tokenization and preprocessing
-"""
-
-from dataclasses import dataclass
-import numpy as np
 import torch
-import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
-from transformers import (
-    ElectraTokenizerFast,
-    ElectraForSequenceClassification,
-    AutoTokenizer,
-    AutoModelForSequenceClassification,
-    get_linear_schedule_with_warmup,
-)
-from typing import Dict, Any, List, Optional
-import random
-from tqdm import tqdm
+from transformers import AutoTokenizer, AutoModelForSequenceClassification, get_linear_schedule_with_warmup
 
 
-class ElectraSentimentDataset(Dataset):
-    """Dataset class for ELECTRA sentiment classification."""
 
-    def __init__(self, encodings: Dict[str, torch.Tensor], labels: np.ndarray):
-        self.encodings = encodings
-        self.labels = torch.tensor(labels, dtype=torch.long)
-
-    def __len__(self):
-        return len(self.labels)
-
-    def __getitem__(self, idx):
-        item = {k: v[idx] for k, v in self.encodings.items()}
-        item["labels"] = self.labels[idx]
+class TxtDS(Dataset):
+    def __init__(self, texts: List[str], labels: List[int] = None):
+        self.texts = texts
+        self.labels = labels
+    def __len__(self): return len(self.texts)
+    def __getitem__(self, i):
+        item = {"text": self.texts[i]}
+        if self.labels is not None:
+            item["label"] = int(self.labels[i])
         return item
 
-
-# -------- Config dataclass --------
-@dataclass
-class ElectraConfig:
-    model_name: str = "google/electra-small-discriminator"
-    learning_rate: float = 3e-5
-    epochs: int = 3
-    batch_size: int = 32
-    max_len: int = 128
-    freeze_bottom_layers: int = 0
-    use_amp: bool = torch.cuda.is_available()  # Only use AMP if CUDA is available
-    device: str = "cuda" if torch.cuda.is_available() else "cpu"
-
-
-# -------- Global tokenizer cache --------
-_tokenizer_cache: Dict[str, Any] = {}
-_encoding_cache: Dict[str, Dict[str, torch.Tensor]] = {}
-
-
-def _get_tokenizer(model_name: str):
-    if model_name not in _tokenizer_cache:
-        _tokenizer_cache[model_name] = AutoTokenizer.from_pretrained(model_name)
-    return _tokenizer_cache[model_name]
-
-
-def _encode_texts(
-    model_name: str, texts: List[str], max_len: int
-) -> Dict[str, torch.Tensor]:
-    """Use global cache to avoid repeating tokenization"""
-    key = f"{model_name}-{max_len}-{len(texts)}"
-    if key in _encoding_cache:
-        return _encoding_cache[key]
-    tokenizer = _get_tokenizer(model_name)
-    enc = tokenizer(
-        texts, padding=True, truncation=True, max_length=max_len, return_tensors="pt"
-    )
-    _encoding_cache[key] = enc
-    return enc
+def _collate_batch(batch):
+    # batch: List[{"text": str, "label": int}]
+    texts = [str(x["text"]) for x in batch]
+    labels = [int(x["label"]) for x in batch] if "label" in batch[0] else None
+    return {"text": texts, "label": labels}
 
 
 class ElectraSentiment:
-    """
-    ELECTRA-based sentiment classifier.
-
-    This class provides a consistent interface for our cross-validation framework
-    while using ELECTRA for fine-tuning.
-    """
-
-    def __init__(self, **params):
-        """
-        Initialize ELECTRA sentiment classifier.
-
-        Args:
-            **params: Hyperparameters including:
-                     - learning_rate: Learning rate for fine-tuning
-                     - batch_size: Batch size for training
-                     - max_length: Maximum sequence length
-                     - epochs: Number of training epochs
-        """
-        # Create base config
-        base_config = ElectraConfig()
-
-        # Apply parameters
-        config_dict = {**base_config.__dict__, **params}
-
-        # Optimize for fast mode (fewer epochs)
-        if config_dict.get("epochs", 3) <= 1:
-            # For very fast training, reduce batch size and use smaller model
-            if "batch_size" not in params:
-                config_dict["batch_size"] = min(config_dict["batch_size"], 16)
-            if "max_len" not in params:
-                config_dict["max_len"] = min(config_dict["max_len"], 96)
-
-        cfg = ElectraConfig(**config_dict)
-        self.cfg = cfg
-        self.model = None
-
-    def _freeze_layers(self, model, n_freeze: int):
-        if n_freeze <= 0:
-            return
-        print(f"[ELECTRA] Freezing bottom {n_freeze} layers")
-        for layer in model.electra.encoder.layer[:n_freeze]:
-            for p in layer.parameters():
-                p.requires_grad = False
-
-    def fit(self, texts, labels):
-        """
-        Fine-tune ELECTRA model on sentiment classification.
-
-        Args:
-            texts: List of text samples
-            labels: List of binary labels (0 or 1)
-        """
-        # Convert to lists if needed
-        if isinstance(texts, np.ndarray):
-            texts = texts.tolist()
-        if isinstance(labels, np.ndarray):
-            labels = labels.tolist()
-
-        # Load pre-trained model and tokenizer
-        cfg = self.cfg
-        device = torch.device(cfg.device)
-        tokenizer = _get_tokenizer(cfg.model_name)
-        enc = _encode_texts(cfg.model_name, texts, cfg.max_len)
-        dataset = ElectraSentimentDataset(enc, labels)
-        dataloader = DataLoader(dataset, batch_size=cfg.batch_size, shuffle=True)
-
+    def __init__(self, **params: Dict[str, Any]):
+        self.p = params
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.tokenizer = AutoTokenizer.from_pretrained(self.p.get("model_name", "google/electra-small-discriminator"))
         self.model = AutoModelForSequenceClassification.from_pretrained(
-            cfg.model_name, num_labels=2
-        )
-        self._freeze_layers(self.model, cfg.freeze_bottom_layers)
-        self.model.to(device)
+            self.p.get("model_name", "google/electra-small-discriminator"),
+            num_labels=2,
+        ).to(self.device)
+        # 冻结底层若干层（可选）
+        self._freeze_layers(self.p.get("freeze_layers", 0))
+        # 简易 tokenization 缓存（进程内）
+        self._enc_cache = {} if self.p.get("cache_tokenization", True) else None
 
-        optimizer = torch.optim.AdamW(self.model.parameters(), lr=cfg.learning_rate)
-        total_steps = len(dataloader) * cfg.epochs
-        scheduler = get_linear_schedule_with_warmup(
-            optimizer, num_warmup_steps=0, num_training_steps=total_steps
-        )
-
-        # Use new API for GradScaler
-        if torch.cuda.is_available() and cfg.use_amp:
-            scaler = torch.amp.GradScaler("cuda")
-        else:
-            scaler = None
-        self.model.train()
-
-        # Training loop
-        print(
-            f"[ELECTRA] Starting training on {device} (AMP: {cfg.use_amp and torch.cuda.is_available()})"
-        )
-        for epoch in range(cfg.epochs):
-            loop = tqdm(
-                dataloader,
-                desc=f"[ELECTRA] Epoch {epoch+1}/{cfg.epochs}",
-                leave=False,
-                disable=False,
-            )
-            total_loss = 0
-            for batch_idx, batch in enumerate(loop):
+    def _freeze_layers(self, n_layers: int):
+        if n_layers <= 0:
+            return
+        for name, p in self.model.named_parameters():
+            # 适配 ELECTRA 小模型结构名
+            if name.startswith("electra.encoder.layer."):
                 try:
-                    inputs = {k: v.to(device) for k, v in batch.items()}
-                    optimizer.zero_grad()
+                    layer_id = int(name.split(".")[3])
+                except Exception:
+                    layer_id = 999
+                if layer_id < n_layers:
+                    p.requires_grad = False
 
-                    # Use new API for autocast
-                    if torch.cuda.is_available() and cfg.use_amp:
-                        with torch.amp.autocast("cuda"):
-                            out = self.model(**inputs)
-                            loss = out.loss
-                        scaler.scale(loss).backward()
-                        scaler.step(optimizer)
-                        scaler.update()
-                    else:
-                        out = self.model(**inputs)
-                        loss = out.loss
-                        loss.backward()
-                        optimizer.step()
+    def _encode_batch(self, texts: List[str]):
+        texts = [str(t) for t in texts]  # 强制转为字符串，作为缓存 key 安全
+        if self._enc_cache is None:
+            return self.tokenizer(
+                texts,
+                padding=True,
+                truncation=True,
+                max_length=self.p.get("max_len", 192),
+                return_tensors="pt",
+            )
+        batch_inputs = {"input_ids": [], "attention_mask": []}
+        miss = [t for t in texts if t not in self._enc_cache]
+        if miss:
+            enc = self.tokenizer(
+                miss, padding=True, truncation=True,
+                max_length=self.p.get("max_len", 192), return_tensors="pt"
+            )
+            for i, t in enumerate(miss):
+                self._enc_cache[t] = {k: v[i].cpu() for k, v in enc.items()}
+        for t in texts:
+            obj = self._enc_cache[t]
+            batch_inputs["input_ids"].append(obj["input_ids"])
+            batch_inputs["attention_mask"].append(obj["attention_mask"])
+        batch_inputs = {k: torch.stack(v, 0) for k, v in batch_inputs.items()}
+        return batch_inputs
 
-                    scheduler.step()
-                    total_loss += loss.item()
-
-                    # Update progress bar
-                    if batch_idx % 10 == 0:  # Update every 10 batches
-                        loop.set_postfix(loss=f"{loss.item():.4f}")
-
-                except Exception as e:
-                    print(f"[ELECTRA] Error in batch {batch_idx}: {e}")
-                    continue
-
-            avg_loss = total_loss / len(dataloader)
-            print(f"[ELECTRA] Epoch {epoch+1} completed - Average loss: {avg_loss:.4f}")
-        return self
-
-    @torch.no_grad()
-    def predict(self, X_texts: List[str]) -> np.ndarray:
-        probs = self.predict_proba(X_texts)
-        return probs.argmax(axis=1)
-
-    @torch.no_grad()
-    def predict_proba(self, X_texts: List[str]) -> np.ndarray:
-        cfg = self.cfg
-        device = torch.device(cfg.device)
-        enc = _encode_texts(cfg.model_name, X_texts, cfg.max_len)
-        dataset = ElectraSentimentDataset(enc, np.zeros(len(X_texts), dtype=np.int64))
-        loader = DataLoader(
-            dataset,
-            batch_size=cfg.batch_size,
-            shuffle=False,
-            pin_memory=torch.cuda.is_available(),  # Only use pin_memory if CUDA is available
+    def fit(self, texts: List[str], y: List[int]):
+        print(f"[ELECTRA] device={self.device}, cuda={torch.cuda.is_available()}, freeze_layers={self.p.get('freeze_layers',0)}")
+        ds = TxtDS(texts, y)
+        dl = DataLoader(
+            ds,
+            batch_size=self.p.get("batch_size", 16),
+            shuffle=True,
+            collate_fn=_collate_batch,
         )
-        self.model.eval()
-        all_logits = []
-        for batch in loader:
-            inputs = {k: v.to(device) for k, v in batch.items() if k != "labels"}
-            out = self.model(**inputs)
-            all_logits.append(out.logits.cpu().numpy())
-        logits = np.concatenate(all_logits, axis=0)
-        exp = np.exp(logits - logits.max(axis=1, keepdims=True))
-        return exp / exp.sum(axis=1, keepdims=True)
 
-    def get_params(self, deep=True):
-        """Get parameters for this estimator."""
-        return self.cfg.__dict__
+        optim = torch.optim.AdamW(self.model.parameters(), lr=self.p.get("lr", 2e-5))
 
-    def set_params(self, **params):
-        """Set parameters for this estimator."""
-        for k, v in params.items():
-            if hasattr(self.cfg, k):
-                setattr(self.cfg, k, v)
+        steps_per_epoch = max(1, len(dl))
+        total_steps = steps_per_epoch * self.p.get("epochs", 2)
+        sched = get_linear_schedule_with_warmup(
+            optim,
+            num_warmup_steps=int(0.1 * total_steps),
+            num_training_steps=total_steps,
+        )
+        lossf = torch.nn.CrossEntropyLoss()
+
+        self.model.train()
+        for ep in range(1, self.p.get("epochs", 2) + 1):
+            total = 0.0
+            for step, batch in enumerate(dl):
+                texts_b = batch["text"]          # List[str]
+                labels_b = batch["label"]        # List[int]
+                enc = self._encode_batch(texts_b)
+                enc = {k: v.to(self.device) for k, v in enc.items()}
+                labels = torch.as_tensor(labels_b, device=self.device)
+
+                optim.zero_grad()
+                out = self.model(**enc, labels=labels)
+                loss = out.loss
+                loss.backward()
+                optim.step()
+                sched.step()
+                total += loss.item()
+            print(f"[ELECTRA] epoch {ep}/{self.p.get('epochs',2)} loss={total / max(1, len(dl)):.4f}")
         return self
 
+    def predict(self, texts: List[str]):
+        self.model.eval()
+        outs = []
+        bs = self.p.get("batch_size", 16)
+        with torch.no_grad():
+            for i in range(0, len(texts), bs):
+                enc = self._encode_batch(texts[i : i + bs])
+                enc = {k: v.to(self.device) for k, v in enc.items()}
+                logits = self.model(**enc).logits
+                pred = logits.argmax(-1).cpu().tolist()
+                outs.extend(pred)
+        return outs
 
-def create_electra_factory(grid, fast=False):
-    """
-    Create a factory function for ELECTRA that works with our CV framework.
 
-    Args:
-        hyperparams: Dictionary of hyperparameters to test
-
-    Returns:
-        factory_function: Function that creates ElectraSentiment instances
-    """
-
-    def factory(params):
-        p = params.copy()
-        if fast:
-            p["freeze_bottom_layers"] = 6
-            p["max_len"] = min(p.get("max_len", 128), 96)
-            p["epochs"] = min(p.get("epochs", 3), 1)
-        return ElectraSentiment(**p)
-
+def create_electra_factory():
+    def factory(params: Dict[str, Any]):
+        return ElectraSentiment(**params)
     return factory

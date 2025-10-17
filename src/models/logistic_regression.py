@@ -1,123 +1,81 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-"""
-Logistic Regression Implementation for Sentiment Classification
-
-This module implements a Logistic Regression classifier that works with our
-cross-validation framework and uses TF-IDF features.
-
-Features:
-- Wrapper class compatible with our CV framework
-- Uses sklearn LogisticRegression internally
-- Handles TF-IDF features properly
-- Implements fit/predict interface
-"""
+# logistic_regression.py
+from typing import Any, Dict
 
 import numpy as np
-import pandas as pd
-import torch
-from scipy.sparse import issparse, spmatrix
-from sklearn.linear_model import LogisticRegression
-from sklearn.feature_extraction.text import TfidfVectorizer
-from typing import Dict, Any, Optional, Union, List
-
-ArrayLike = Union[np.ndarray, List[str], spmatrix]
+from sklearn.feature_extraction.text import TfidfVectorizer, HashingVectorizer
+from sklearn.linear_model import LogisticRegression, SGDClassifier
+from sklearn.pipeline import make_pipeline
 
 
-class LogisticRegressionSentiment:
-    def __init__(self, **params):
-        self.params = params
-        self.model: Optional[LogisticRegression] = None
-        self.vectorizer: Optional[TfidfVectorizer] = None
+class TfidfLogRegEstimator:
+    """将 TF-IDF/Hashing 与 LR 封装为 sklearn 风格估计器。
 
-    def _ensure_vectorized(self, X: ArrayLike, fit: bool = False):
-        # If X is list/np array of strings -> vectorize; else pass through (assume sparse/ndarray)
-        if (
-            isinstance(X, list)
-            and (len(X) == 0 or isinstance(X[0], str))
-            or (
-                isinstance(X, np.ndarray)
-                and X.dtype == object
-                and X.size > 0
-                and isinstance(X[0], str)
+    params:
+      - use_hashing: 是否使用 HashingVectorizer（无拟合，提速）
+      - n_features:  哈希维度
+      - tfidf_max_features, tfidf_ngram: 仅在 use_hashing=False 时生效
+      - C, solver, max_iter: LR 参数
+    """
+
+    def __init__(self, **params: Dict[str, Any]):
+        self.p = params
+        self.model = None
+
+    def fit(self, texts, y):
+        use_hashing = self.p.get("use_hashing", False)
+        if use_hashing:
+            hv = HashingVectorizer(n_features=self.p.get("n_features", 2 ** 20), alternate_sign=False)
+            # 线性分类器（这里用 LogisticRegression 需要密集特征；我们选 SGDClassifier 支持稀疏）
+            cls = SGDClassifier(loss="log", max_iter=self.p.get("max_iter", 1000))
+            self.model = make_pipeline(hv, cls)
+        else:
+            tfidf = TfidfVectorizer(
+                max_features=self.p.get("tfidf_max_features", 20000),
+                ngram_range=self.p.get("tfidf_ngram", (1, 1)),
+                lowercase=True,
             )
-        ):
-            if self.vectorizer is None:
-                if not fit:
-                    raise ValueError(
-                        "Vectorizer not fitted yet. Call fit() or pass vectorized features."
-                    )
-                max_feat = self.params.get("tfidf_max_features", 50000)
-                ngram = self.params.get("tfidf_ngram", (1, 2))
-                self.vectorizer = TfidfVectorizer(
-                    max_features=max_feat,
-                    ngram_range=ngram,
-                    min_df=2,
-                    sublinear_tf=True,
-                )
-                X_vec = self.vectorizer.fit_transform(X)
-            else:
-                X_vec = self.vectorizer.transform(X)
-            return X_vec
-        return X
-
-    def fit(self, X: ArrayLike, y: np.ndarray):
-        Xv = self._ensure_vectorized(X, fit=True)
-
-        # Create and train model - filter out TF-IDF specific parameters
-        lr_params = {
-            k: v
-            for k, v in self.params.items()
-            if k not in ["tfidf_max_features", "tfidf_ngram"]
-        }
-        self.model = LogisticRegression(**lr_params, random_state=42)
-        self.model.fit(Xv, y)
+            X = tfidf.fit_transform(texts)
+            cls = LogisticRegression(
+                C=self.p.get("C", 1.0),
+                solver=self.p.get("solver", "liblinear"),
+                max_iter=self.p.get("max_iter", 500),
+            )
+            cls.fit(X, y)
+            # 将向量器与分类器保留在对象中以便 predict 使用
+            self.model = (tfidf, cls)
         return self
 
-    def predict(self, X: ArrayLike) -> np.ndarray:
-        if self.model is None:
-            raise ValueError("Model must be fitted before making predictions")
-        Xv = self._ensure_vectorized(X, fit=False)
-        return self.model.predict(Xv)
+    def predict(self, texts):
+        if isinstance(self.model, tuple):
+            tfidf, cls = self.model
+            X = tfidf.transform(texts)
+            return cls.predict(X)
+        else:
+            return self.model.predict(texts)
 
-    def predict_proba(self, X: ArrayLike) -> np.ndarray:
-        """
-        Get prediction probabilities.
-
-        Args:
-            X: Features (can be TF-IDF matrix or raw text)
-
-        Returns:
-            probabilities: Prediction probabilities for each class
-        """
-        if self.model is None:
-            raise ValueError("Model must be fitted before making predictions")
-        Xv = self._ensure_vectorized(X, fit=False)
-        return self.model.predict_proba(Xv)
-
-    # sklearn-like API for CV
-    def get_params(self, deep=True):
-        """Get parameters for this estimator."""
-        return self.params
-
-    def set_params(self, **params):
-        """Set parameters for this estimator."""
-        self.params.update(params)
-        return self
+    def predict_proba(self, texts):
+        if isinstance(self.model, tuple):
+            tfidf, cls = self.model
+            X = tfidf.transform(texts)
+            if hasattr(cls, "predict_proba"):
+                return cls.predict_proba(X)
+            # SGDClassifier(log) 可用 decision_function 近似
+            scores = cls.decision_function(X)
+            # 二分类 sigmoid
+            from scipy.special import expit
+            p1 = expit(scores)
+            return np.vstack([1 - p1, p1]).T
+        else:
+            if hasattr(self.model, "predict_proba"):
+                return self.model.predict_proba(texts)
+            scores = self.model.decision_function(texts)
+            from scipy.special import expit
+            p1 = expit(scores)
+            return np.vstack([1 - p1, p1]).T
 
 
-def create_logistic_regression_factory(hyperparams: Dict[str, Any]):
-    """
-    Create a factory function for Logistic Regression that works with our CV framework.
-
-    Args:
-        hyperparams: Dictionary of hyperparameters to test
-
-    Returns:
-        factory_function: Function that creates LogisticRegressionSentiment instances
-    """
-
-    def factory(params):
-        return LogisticRegressionSentiment(**params)
+def create_lr_factory():
+    def factory(params: Dict[str, Any]):
+        return TfidfLogRegEstimator(**params)
 
     return factory

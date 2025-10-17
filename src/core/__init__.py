@@ -1,25 +1,6 @@
-# Core components for sentiment classification
+# src/core/__init__.py
 
-from .cross_validation import StratifiedKFold, NestedCrossValidator, create_cv_framework
-from .metrics import (
-    accuracy_score,
-    precision_score,
-    recall_score,
-    f1_score,
-    confusion_matrix,
-    classification_report,
-    compute_all_metrics,
-)
+# 仅导出当前实现里存在的 API
+from .cross_validation import nested_cv
 
-__all__ = [
-    "StratifiedKFold",
-    "NestedCrossValidator",
-    "create_cv_framework",
-    "accuracy_score",
-    "precision_score",
-    "recall_score",
-    "f1_score",
-    "confusion_matrix",
-    "classification_report",
-    "compute_all_metrics",
-]
+__all__ = ["nested_cv"]

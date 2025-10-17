@@ -1,504 +1,70 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-"""
-Main Experimental Pipeline for Sentiment Classification Research
-
-This module orchestrates the complete experimental pipeline for the research question:
-"How do different text representation methods (TF-IDF, Word2Vec, ELECTRA) perform
-across increasing model complexity levels (LogReg, BiLSTM, ELECTRA) for sentiment classification?"
-
-The pipeline coordinates:
-1. Data loading and preprocessing
-2. Feature extraction
-3. Hyperparameter tuning
-4. Learning curve experiments
-5. Results collection and visualization
-"""
-
-import numpy as np
-import pandas as pd
+# experimental_pipeline.py
+import argparse
 import json
-from pathlib import Path
-from typing import Dict, Any
-from datetime import datetime
-import matplotlib.pyplot as plt
-import seaborn as sns
+import os
 
-# Import our modules
-import sys
-from pathlib import Path
+import pandas as pd
 
-sys.path.append(str(Path(__file__).parent.parent))
-
-from core.metrics import f1_score, accuracy_score, compute_all_metrics
-from extract_features import do_tfidf, do_w2v, do_electra
-from prepare_dataset import main as prepare_data
-from models.logistic_regression import create_logistic_regression_factory
-from models.electra_sentiment import create_electra_factory
-from models.bilstm_sentiment import create_bilstm_factory
-
-try:
-    from .hyperparameter_tuning import (
-        HyperparameterTuner,
-        HYPERPARAMETER_GRIDS,
-        HYPERPARAMETER_GRIDS_FAST,
-    )
-    from .learning_curves import LearningCurveExperiment
-except ImportError:
-    # Fallback for direct script execution
-    from hyperparameter_tuning import (
-        HyperparameterTuner,
-        HYPERPARAMETER_GRIDS,
-        HYPERPARAMETER_GRIDS_FAST,
-    )
-    from learning_curves import LearningCurveExperiment
-
-
-class ExperimentalPipeline:
-    """
-    Main experimental pipeline for sentiment classification research.
-
-    This class orchestrates the complete experimental workflow from data loading
-    to results visualization.
-    """
-
-    def __init__(
-        self,
-        data_dir: str = "data",
-        results_dir: str = "results",
-        random_state: int = 42,
-        fast: bool = False,
-    ):
-        self.fast = fast
-        """
-        Initialize experimental pipeline.
-
-        Args:
-            data_dir: Directory containing dataset files
-            results_dir: Directory to save results
-            features_dir: Directory to save/load features
-            random_state: Random seed for reproducibility
-        """
-        self.data_dir = Path(data_dir)
-        self.results_dir = Path(results_dir)
-        self.random_state = random_state
-        self.results_dir.mkdir(exist_ok=True)
-        self.data: pd.DataFrame | None = None
-        self.results: Dict[str, Any] = {}
-
-        # Experiment configuration
-        self.experiment_defs = [
-            ("TF-IDF + Logistic Regression", "logreg"),
-            ("Word2Vec + BiLSTM", "bilstm"),
-            ("ELECTRA fine-tune", "electra"),
-        ]
-
-        # Hyperparameter grids
-        grids = HYPERPARAMETER_GRIDS_FAST if self.fast else HYPERPARAMETER_GRIDS
-        self.hyperparams = {
-            "logreg": grids["logistic_regression"],
-            "bilstm": grids["bilstm"],
-            "electra": grids["electra"],
-        }
-
-    def load_and_prepare_data(self):
-        """Load and prepare the IMDB dataset."""
-        print("=" * 60)
-        print("STEP 1: Loading and Preparing Data")
-        print("=" * 60)
-
-        # Check if clean data exists
-        clean_path = self.data_dir / "imdb_clean.csv"
-        if not clean_path.exists():
-            print("[info] Clean file not found; preparing dataset...")
-            prepare_data()
-
-        # Load clean data
-        self.data = pd.read_csv(clean_path)
-        print(
-            f"[data] rows={len(self.data)}, balance={self.data['label'].value_counts().to_dict()}"
-        )
-
-        # Show sample data
-        print("\nSample data:")
-        print(self.data.head())
-
-    # def extract_features(self):
-    #     """Extract all three types of features."""
-    #     print("\n" + "=" * 60)
-    #     print("STEP 2: Extracting Features")
-    #     print("=" * 60)
-
-    #     # Extract TF-IDF features
-    #     print("Extracting TF-IDF features...")
-    #     do_tfidf(
-    #         self.data_dir / "imdb_clean.csv",
-    #         self.features_dir,
-    #         max_word_features=50000,
-    #         max_char_features=100000,
-    #     )
-
-    #     # Extract Word2Vec features
-    #     print("Extracting Word2Vec features...")
-    #     do_w2v(
-    #         self.data_dir / "imdb_clean.csv", self.features_dir, vec_size=100, epochs=5
-    #     )
-
-    #     # Extract ELECTRA features
-    #     print("Extracting ELECTRA features...")
-    #     do_electra(
-    #         self.data_dir / "imdb_clean.csv",
-    #         self.features_dir,
-    #         batch_size=16,
-    #         max_len=256,
-    #         pool="cls",
-    #     )
-
-    #     # Load features into memory
-    #     self._load_features()
-
-    # def _load_features(self):
-    #     """Load extracted features into memory."""
-    #     print("\nLoading features into memory...")
-
-    #     # Load TF-IDF features
-    #     tfidf_path = self.features_dir / "imdb_tfidf.npz"
-    #     if tfidf_path.exists():
-    #         from scipy.sparse import load_npz
-
-    #         self.features["tfidf"] = load_npz(tfidf_path).toarray()
-    #         print(f"Loaded TF-IDF features: {self.features['tfidf'].shape}")
-
-    #     # Load Word2Vec features
-    #     w2v_path = self.features_dir / "imdb_w2v_avg.npy"
-    #     if w2v_path.exists():
-    #         self.features["w2v"] = np.load(w2v_path)
-    #         print(f"Loaded Word2Vec features: {self.features['w2v'].shape}")
-
-    #     # Load ELECTRA features
-    #     electra_path = self.features_dir / "imdb_electra_cls.npy"
-    #     if electra_path.exists():
-    #         self.features["electra"] = np.load(electra_path)
-    #         print(f"Loaded ELECTRA features: {self.features['electra'].shape}")
-
-    def run_hyperparameter_tuning(self):
-        """Run hyperparameter tuning for all models."""
-        print("\n" + "=" * 60)
-        print("STEP 2: Hyperparameter Tuning")
-        print("=" * 60)
-
-        assert self.data is not None
-        X_text = self.data["text"].tolist()
-        y = self.data["label"].to_numpy()
-
-        outer = 3 if self.fast else 10
-        inner = 2 if self.fast else 3
-
-        # Create hyperparameter tuner
-        tuner = HyperparameterTuner(
-            outer_folds=outer,
-            inner_folds=inner,
-            random_state=self.random_state,
-            scoring_func=f1_score,
-            fast=self.fast,
-        )
-
-        # Prepare experiments
-        experiments = []
-        for exp_name, model_key in self.experiment_defs:
-            if model_key == "logreg":
-                factory = create_logistic_regression_factory(
-                    self.hyperparams[model_key]
-                )
-            elif model_key == "bilstm":
-                factory = create_bilstm_factory(self.hyperparams[model_key])
-            elif model_key == "electra":
-                factory = create_electra_factory(self.hyperparams[model_key])
-            else:
-                print(f"[warn] model {model_key} not wired yet; skipping.")
-                continue
-            experiments.append(
-                (exp_name, X_text, y, factory, self.hyperparams[model_key])
-            )
-
-        # Run hyperparameter tuning
-        tuning_results = tuner.tune_multiple_models(experiments)
-
-        # Store results
-        self.results["hyperparameter_tuning"] = tuning_results
-
-        # Show best models
-        best_models = tuner.get_best_models()
-        print("\nBest hyperparameters found:")
-        for model_name, config in best_models.items():
-            print(
-                f"{model_name}: {config['best_params']} (F1: {config['cv_score']:.4f})"
-            )
-
-        return tuning_results
-
-    def run_learning_curves(self):
-        """Run learning curve experiments."""
-        print("\n" + "=" * 60)
-        print("STEP 3: Learning Curve Experiments")
-        print("=" * 60)
-
-        assert self.data is not None
-        X_text = self.data["text"].tolist()
-        y = self.data["label"].to_numpy()
-
-        # Create learning curve experiment
-        lc_experiment = LearningCurveExperiment(
-            training_sizes=[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
-            outer_folds=5,  # Fewer folds for learning curves
-            inner_folds=3,
-            random_state=self.random_state,
-            scoring_func=f1_score,
-        )
-
-        # Prepare experiments
-        experiments = []
-        for exp_name, model_key in self.experiment_defs:
-            if model_key == "logreg":
-                factory = create_logistic_regression_factory(
-                    self.hyperparams[model_key]
-                )
-            elif model_key == "bilstm":
-                factory = create_bilstm_factory(self.hyperparams[model_key])
-            elif model_key == "electra":
-                factory = create_electra_factory(self.hyperparams[model_key])
-            else:
-                print(f"[warn] model {model_key} not wired yet; skipping.")
-                continue
-            experiments.append(
-                (exp_name, X_text, y, factory, self.hyperparams[model_key])
-            )
-
-        # Run learning curve experiments
-        lc_results = lc_experiment.generate_multiple_learning_curves(experiments)
-
-        # Store results
-        self.results["learning_curves"] = lc_results
-
-        # Show summary
-        summary_df = lc_experiment.get_summary()
-        print("\nLearning curve summary:")
-        print(summary_df)
-
-        return lc_results
-
-    def create_visualizations(self):
-        """Create visualizations for the results."""
-        print("\n" + "=" * 60)
-        print("STEP 4: Creating Visualizations")
-        print("=" * 60)
-
-        # Set style
-        plt.style.use("seaborn-v0_8")
-
-        # 1. Model comparison bar chart
-        self._create_model_comparison_chart()
-
-        # 2. Learning curves
-        self._create_learning_curves_plot()
-
-        print("Visualizations saved to results/ directory")
-
-    def _create_model_comparison_chart(self):
-        """Create bar chart comparing model performance."""
-        if "hyperparameter_tuning" not in self.results:
-            print("No hyperparameter tuning results to visualize")
-            return
-
-        fig, ax = plt.subplots(figsize=(12, 8))
-
-        model_names = []
-        f1_scores = []
-        f1_stds = []
-
-        for model_name, results in self.results["hyperparameter_tuning"].items():
-            if "cv_results" in results and results["cv_results"] is not None:
-                model_names.append(model_name)
-                f1_scores.append(results["cv_results"]["mean_cv_score"])
-                f1_stds.append(results["cv_results"]["std_cv_score"])
-
-        if not model_names:
-            print("No valid results for model comparison")
-            return
-
-        x_pos = np.arange(len(model_names))
-        bars = ax.bar(x_pos, f1_scores, yerr=f1_stds, capsize=5, alpha=0.7)
-
-        ax.set_xlabel("Model")
-        ax.set_ylabel("F1 Score")
-        ax.set_title("Model Performance Comparison")
-        ax.set_xticks(x_pos)
-        ax.set_xticklabels(model_names, rotation=45, ha="right")
-
-        # Add value labels on bars
-        for i, (score, std) in enumerate(zip(f1_scores, f1_stds)):
-            ax.text(i, score + std + 0.01, f"{score:.3f}", ha="center", va="bottom")
-
-        plt.tight_layout()
-        plt.savefig(
-            self.results_dir / "model_comparison.png", dpi=300, bbox_inches="tight"
-        )
-        plt.close()
-
-        print("Model comparison chart saved")
-
-    def _create_learning_curves_plot(self):
-        """Create learning curves plot."""
-        if "learning_curves" not in self.results:
-            print("No learning curve results to visualize")
-            return
-
-        fig, ax = plt.subplots(figsize=(12, 8))
-
-        for model_name, results in self.results["learning_curves"].items():
-            if "error" in results:
-                continue
-
-            training_sizes = results["training_sizes"]
-            scores = results["scores"]
-            score_stds = results["score_stds"]
-
-            if not training_sizes:
-                continue
-
-            # Convert to percentages
-            sizes_pct = [s * 100 for s in training_sizes]
-
-            # Plot learning curve
-            ax.plot(sizes_pct, scores, marker="o", label=model_name, linewidth=2)
-            ax.fill_between(
-                sizes_pct,
-                np.array(scores) - np.array(score_stds),
-                np.array(scores) + np.array(score_stds),
-                alpha=0.3,
-            )
-
-        ax.set_xlabel("Training Set Size (%)")
-        ax.set_ylabel("F1 Score")
-        ax.set_title("Learning Curves: F1 Score vs Training Set Size")
-        ax.legend()
-        ax.grid(True, alpha=0.3)
-
-        plt.tight_layout()
-        plt.savefig(
-            self.results_dir / "learning_curves.png", dpi=300, bbox_inches="tight"
-        )
-        plt.close()
-
-        print("Learning curves plot saved")
-
-    def save_results(self):
-        """Save all results to files."""
-        print("\n" + "=" * 60)
-        print("STEP 5: Saving Results")
-        print("=" * 60)
-
-        # Save raw results
-        results_path = (
-            self.results_dir
-            / f"experiment_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-        )
-
-        # Convert numpy arrays to lists for JSON serialization
-        json_results = {}
-        for key, value in self.results.items():
-            if isinstance(value, dict):
-                json_results[key] = {}
-                for sub_key, sub_value in value.items():
-                    if isinstance(sub_value, dict):
-                        json_results[key][sub_key] = sub_value
-                    elif isinstance(sub_value, (list, np.ndarray)):
-                        json_results[key][sub_key] = list(sub_value)
-                    else:
-                        json_results[key][sub_key] = sub_value
-            else:
-                json_results[key] = value
-
-        with open(results_path, "w") as f:
-            json.dump(json_results, f, indent=2)
-
-        print(f"Results saved to: {results_path}")
-
-        # Save summary
-        self._save_summary()
-
-    def _save_summary(self):
-        """Save a summary of the experiment results."""
-        summary = {
-            "experiment_info": {
-                "timestamp": datetime.now().isoformat(),
-                "fast_mode": self.fast,
-                "random_state": self.random_state,
-                "data_size": len(self.data) if self.data is not None else 0,
-            },
-            "model_performance": {},
-            "best_hyperparameters": {},
-        }
-
-        # Add hyperparameter tuning results
-        if "hyperparameter_tuning" in self.results:
-            for model_name, results in self.results["hyperparameter_tuning"].items():
-                if "cv_results" in results and results["cv_results"] is not None:
-                    summary["model_performance"][model_name] = {
-                        "mean_cv_score": results["cv_results"]["mean_cv_score"],
-                        "std_cv_score": results["cv_results"]["std_cv_score"],
-                        "best_params": results["cv_results"]["best_params"],
-                    }
-                    summary["best_hyperparameters"][model_name] = results["cv_results"][
-                        "best_params"
-                    ]
-
-        # Add learning curve results
-        if "learning_curves" in self.results:
-            summary["learning_curves"] = {}
-            for model_name, results in self.results["learning_curves"].items():
-                if "error" not in results and results.get("scores"):
-                    summary["learning_curves"][model_name] = {
-                        "final_score": (
-                            results["scores"][-1] if results["scores"] else None
-                        ),
-                        "training_sizes": results.get("training_sizes", []),
-                        "scores": results.get("scores", []),
-                    }
-
-        # Save summary
-        summary_path = self.results_dir / "experiment_summary.json"
-        with open(summary_path, "w") as f:
-            json.dump(summary, f, indent=2)
-
-        print(f"Summary saved to: {summary_path}")
-
-    def run_complete_pipeline(self):
-        """Run the complete experimental pipeline."""
-        try:
-            # Step 1: Load and prepare data
-            self.load_and_prepare_data()
-
-            # Step 3: Run hyperparameter tuning
-            self.run_hyperparameter_tuning()
-
-            # Step 4: Run learning curve experiments
-            # self.run_learning_curves()
-
-            # Step 5: Create visualizations
-            self.create_visualizations()
-
-            # Step 6: Save results
-            self.save_results()
-
-        except Exception as e:
-            raise
+from models.models_registry import get_factory_and_grid
+from core.cross_validation import nested_cv
 
 
 def main():
-    """Main function to run the complete experimental pipeline."""
-    pipeline = ExperimentalPipeline(fast=False)
-    pipeline.run_complete_pipeline()
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--csv", required=True, help="path to imdb_clean.csv")
+    ap.add_argument("--model", required=True, choices=["lr", "bilstm", "electra"], help="which model to run")
+    ap.add_argument("--outer_k", type=int, default=3)
+    ap.add_argument("--inner_k", type=int, default=2)
+    ap.add_argument("--fast", action="store_true")
+    # 可覆盖网格中的关键项
+    ap.add_argument("--use_hashing", action="store_true")
+    ap.add_argument("--emb_path", default=None)
+    ap.add_argument("--freeze_emb", action="store_true")
+    ap.add_argument("--freeze_layers", type=int, default=None)
+    ap.add_argument("--max_len", type=int, default=None)
+    args = ap.parse_args()
+
+    df = pd.read_csv(args.csv)
+    X = df["text"].astype(str).tolist()
+    y = df["label"].astype(int).tolist()
+
+    factory, grid = get_factory_and_grid(args.model, fast=args.fast)
+
+    # 覆盖 grid 中的部分字段（若提供）
+    def patched(g):
+        g = dict(g)
+        if args.use_hashing is True and args.model == "lr":
+            g["use_hashing"] = True
+        if args.emb_path is not None and args.model == "bilstm":
+            g["emb_path"] = args.emb_path
+            g.setdefault("freeze_emb", args.freeze_emb)
+        if args.freeze_layers is not None and args.model == "electra":
+            g["freeze_layers"] = args.freeze_layers
+        if args.max_len is not None and args.model in ("bilstm", "electra"):
+            g["max_len"] = args.max_len
+        return g
+
+    grid = [patched(g) for g in grid]
+
+    print("============================================================")
+    print(f"Tuning hyperparameters for: {args.model}")
+    print("============================================================")
+    print(f"Data length: {len(X)}\nOuter folds: {args.outer_k}, Inner folds: {args.inner_k}")
+
+    results = nested_cv(
+        X,
+        y,
+        outer_k=args.outer_k,
+        inner_k=args.inner_k,
+        estimator_factory=factory,
+        param_grid=grid,
+    )
+
+    out = os.path.splitext(os.path.basename(args.csv))[0]
+    out = f"{out}.{args.model}.nestedcv.json"
+    with open(out, "w", encoding="utf-8") as f:
+        json.dump(results, f, ensure_ascii=False, indent=2)
+    print(f"Saved: {out}")
 
 
 if __name__ == "__main__":
