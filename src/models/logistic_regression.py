@@ -49,6 +49,9 @@ class LogisticRegressionSentiment:
                     )
                 max_feat = self.params.get("tfidf_max_features", 50000)
                 ngram = self.params.get("tfidf_ngram", (1, 2))
+                # Ensure ngram is a tuple
+                if isinstance(ngram, list):
+                    ngram = tuple(ngram)
                 self.vectorizer = TfidfVectorizer(
                     max_features=max_feat,
                     ngram_range=ngram,

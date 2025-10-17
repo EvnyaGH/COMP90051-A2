@@ -178,11 +178,11 @@ class TestEvaluator:
         test_results = {}
 
         for model_name, results in cv_results.items():
-            if "cv_results" not in results or results["cv_results"] is None:
+            if "best_params" not in results or results["best_params"] is None:
                 print(f"Skipping {model_name}: No valid CV results")
                 continue
 
-            best_params = results["cv_results"]["best_params"]
+            best_params = results["best_params"]
             test_results[model_name] = self.evaluate_model(model_name, best_params)
 
         return test_results

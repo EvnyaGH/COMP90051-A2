@@ -284,10 +284,12 @@ class ExperimentalPipeline:
         f1_stds = []
 
         for model_name, results in self.results["hyperparameter_tuning"].items():
-            if "cv_results" in results and results["cv_results"] is not None:
+            if "cv_scores" in results and results["cv_scores"] is not None:
                 model_names.append(model_name)
-                f1_scores.append(results["cv_results"]["mean_cv_score"])
-                f1_stds.append(results["cv_results"]["std_cv_score"])
+                # Calculate mean and std from cv_scores
+                cv_scores = results["cv_scores"]
+                f1_scores.append(np.mean(cv_scores))
+                f1_stds.append(np.std(cv_scores))
 
         if not model_names:
             print("No valid results for model comparison")
