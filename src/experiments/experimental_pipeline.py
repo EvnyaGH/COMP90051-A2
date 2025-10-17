@@ -158,8 +158,8 @@ class ExperimentalPipeline:
         X_text = self.data["text"].tolist()
         y = self.data["label"].to_numpy()
 
-        outer = 3  # if self.fast else 5
-        inner = 2  # if self.fast else 3
+        outer = 3   if self.fast else 5
+        inner = 2   if self.fast else 3
 
         # Create hyperparameter tuner
         tuner = HyperparameterTuner(
