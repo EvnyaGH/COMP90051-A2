@@ -22,7 +22,6 @@ from pathlib import Path
 from typing import Dict, Any
 from datetime import datetime
 import matplotlib.pyplot as plt
-import seaborn as sns
 
 # Import our modules
 import sys
@@ -30,8 +29,7 @@ from pathlib import Path
 
 sys.path.append(str(Path(__file__).parent.parent))
 
-from core.metrics import f1_score, accuracy_score, compute_all_metrics
-from extract_features import do_tfidf, do_w2v, do_electra
+from core.metrics import f1_score
 from prepare_dataset import main as prepare_data
 from models.logistic_regression import create_logistic_regression_factory
 from models.electra_sentiment import create_electra_factory
@@ -44,6 +42,7 @@ try:
         HYPERPARAMETER_GRIDS_FAST,
     )
     from .learning_curves import LearningCurveExperiment
+    from .visualization import plot_model_performance, export_summary_table
 except ImportError:
     # Fallback for direct script execution
     from hyperparameter_tuning import (
@@ -52,6 +51,7 @@ except ImportError:
         HYPERPARAMETER_GRIDS_FAST,
     )
     from learning_curves import LearningCurveExperiment
+    from visualization import plot_model_performance, export_summary_table
 
 
 class ExperimentalPipeline:
@@ -68,8 +68,10 @@ class ExperimentalPipeline:
         results_dir: str = "results",
         random_state: int = 42,
         fast: bool = False,
+        include_learning_curves: bool = False,
     ):
         self.fast = fast
+        self.include_learning_curves = include_learning_curves
         """
         Initialize experimental pipeline.
 
@@ -123,64 +125,6 @@ class ExperimentalPipeline:
         print("\nSample data:")
         print(self.data.head())
 
-    # def extract_features(self):
-    #     """Extract all three types of features."""
-    #     print("\n" + "=" * 60)
-    #     print("STEP 2: Extracting Features")
-    #     print("=" * 60)
-
-    #     # Extract TF-IDF features
-    #     print("Extracting TF-IDF features...")
-    #     do_tfidf(
-    #         self.data_dir / "imdb_clean.csv",
-    #         self.features_dir,
-    #         max_word_features=50000,
-    #         max_char_features=100000,
-    #     )
-
-    #     # Extract Word2Vec features
-    #     print("Extracting Word2Vec features...")
-    #     do_w2v(
-    #         self.data_dir / "imdb_clean.csv", self.features_dir, vec_size=100, epochs=5
-    #     )
-
-    #     # Extract ELECTRA features
-    #     print("Extracting ELECTRA features...")
-    #     do_electra(
-    #         self.data_dir / "imdb_clean.csv",
-    #         self.features_dir,
-    #         batch_size=16,
-    #         max_len=256,
-    #         pool="cls",
-    #     )
-
-    #     # Load features into memory
-    #     self._load_features()
-
-    # def _load_features(self):
-    #     """Load extracted features into memory."""
-    #     print("\nLoading features into memory...")
-
-    #     # Load TF-IDF features
-    #     tfidf_path = self.features_dir / "imdb_tfidf.npz"
-    #     if tfidf_path.exists():
-    #         from scipy.sparse import load_npz
-
-    #         self.features["tfidf"] = load_npz(tfidf_path).toarray()
-    #         print(f"Loaded TF-IDF features: {self.features['tfidf'].shape}")
-
-    #     # Load Word2Vec features
-    #     w2v_path = self.features_dir / "imdb_w2v_avg.npy"
-    #     if w2v_path.exists():
-    #         self.features["w2v"] = np.load(w2v_path)
-    #         print(f"Loaded Word2Vec features: {self.features['w2v'].shape}")
-
-    #     # Load ELECTRA features
-    #     electra_path = self.features_dir / "imdb_electra_cls.npy"
-    #     if electra_path.exists():
-    #         self.features["electra"] = np.load(electra_path)
-    #         print(f"Loaded ELECTRA features: {self.features['electra'].shape}")
-
     def run_hyperparameter_tuning(self):
         """Run hyperparameter tuning for all models."""
         print("\n" + "=" * 60)
@@ -191,8 +135,8 @@ class ExperimentalPipeline:
         X_text = self.data["text"].tolist()
         y = self.data["label"].to_numpy()
 
-        outer = 3 if self.fast else 10
-        inner = 2 if self.fast else 3
+        outer = 3# if self.fast else 5
+        inner = 2# if self.fast else 3
 
         # Create hyperparameter tuner
         tuner = HyperparameterTuner(
@@ -249,9 +193,9 @@ class ExperimentalPipeline:
 
         # Create learning curve experiment
         lc_experiment = LearningCurveExperiment(
-            training_sizes=[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
-            outer_folds=5,  # Fewer folds for learning curves
-            inner_folds=3,
+            training_sizes=[0.1, 0.3, 0.5, 0.7, 0.9, 1.0],
+            outer_folds=3,  # Fewer folds for learning curves
+            inner_folds=2,
             random_state=self.random_state,
             scoring_func=f1_score,
         )
@@ -411,7 +355,10 @@ class ExperimentalPipeline:
                 json_results[key] = {}
                 for sub_key, sub_value in value.items():
                     if isinstance(sub_value, dict):
-                        json_results[key][sub_key] = sub_value
+                        json_results[key][sub_key] = {
+                            k: (v.tolist() if hasattr(v, "tolist") else v)
+                            for k, v in sub_value.items()
+                        }
                     elif isinstance(sub_value, (list, np.ndarray)):
                         json_results[key][sub_key] = list(sub_value)
                     else:
@@ -420,58 +367,87 @@ class ExperimentalPipeline:
                 json_results[key] = value
 
         with open(results_path, "w") as f:
-            json.dump(json_results, f, indent=2)
+            json.dump(json_results, f, indent=2, sort_keys=True, ensure_ascii=False)
 
         print(f"Results saved to: {results_path}")
 
         # Save summary
-        self._save_summary()
+        self._print_summary_table()
+        self._save_summary_text()
 
-    def _save_summary(self):
-        """Save a summary of the experiment results."""
-        summary = {
-            "experiment_info": {
-                "timestamp": datetime.now().isoformat(),
-                "fast_mode": self.fast,
-                "random_state": self.random_state,
-                "data_size": len(self.data) if self.data is not None else 0,
-            },
-            "model_performance": {},
-            "best_hyperparameters": {},
-        }
+        ht = self.results.get("hyperparameter_tuning", {})
+        if ht:
+            plot_model_performance(ht, self.results_dir)
+            export_summary_table(ht, self.results_dir)
+            print(
+                f"[plots] Saved model_performance_bar.png and model_summary.(csv|md) into {self.results_dir}"
+            )
 
-        # Add hyperparameter tuning results
-        if "hyperparameter_tuning" in self.results:
-            for model_name, results in self.results["hyperparameter_tuning"].items():
-                if "cv_results" in results and results["cv_results"] is not None:
-                    summary["model_performance"][model_name] = {
-                        "mean_cv_score": results["cv_results"]["mean_cv_score"],
-                        "std_cv_score": results["cv_results"]["std_cv_score"],
-                        "best_params": results["cv_results"]["best_params"],
-                    }
-                    summary["best_hyperparameters"][model_name] = results["cv_results"][
-                        "best_params"
-                    ]
+    def _print_summary_table(self):
+        """
+        Pretty console table for best models and metrics across experiments.
+        Expects self.results['hyperparameter_tuning'] filled by tuner.
+        """
+        ht = self.results.get("hyperparameter_tuning", {})
+        if not ht:
+            return
+        print("\n" + "=" * 60)
+        print("MODEL SUMMARY (mean over outer folds)")
+        print("=" * 60)
+        header = f"{'Model':30} | {'Acc':>6} | {'Prec':>6} | {'Rec':>6} | {'F1':>6}"
+        print(header)
+        print("-" * len(header))
+        for model_name, res in ht.items():
+            am = res.get("aggregate_metrics", {})
+            acc = am.get("accuracy", None)
+            prec = am.get("precision", None)
+            rec = am.get("recall", None)
+            f1 = am.get("f1", res.get("mean_cv_score", None))
 
-        # Add learning curve results
-        if "learning_curves" in self.results:
-            summary["learning_curves"] = {}
-            for model_name, results in self.results["learning_curves"].items():
-                if "error" not in results and results.get("scores"):
-                    summary["learning_curves"][model_name] = {
-                        "final_score": (
-                            results["scores"][-1] if results["scores"] else None
-                        ),
-                        "training_sizes": results.get("training_sizes", []),
-                        "scores": results.get("scores", []),
-                    }
+            def fmt(x):
+                return (
+                    f"{x:.4f}"
+                    if isinstance(x, (int, float)) and x is not None
+                    else "  NA  "
+                )
 
-        # Save summary
-        summary_path = self.results_dir / "experiment_summary.json"
-        with open(summary_path, "w") as f:
-            json.dump(summary, f, indent=2)
+            print(
+                f"{model_name:30} | {fmt(acc)} | {fmt(prec)} | {fmt(rec)} | {fmt(f1)}"
+            )
+        print("=" * 60)
 
-        print(f"Summary saved to: {summary_path}")
+    def _save_summary_text(self):
+        """
+        Save the same summary table to a .txt file next to the JSON for quick viewing.
+        """
+        out = self.results_dir / "experiment_summary.txt"
+        ht = self.results.get("hyperparameter_tuning", {})
+        lines = []
+        lines.append("MODEL SUMMARY (mean over outer folds)")
+        lines.append("=" * 60)
+        header = f"{'Model':30} | {'Acc':>6} | {'Prec':>6} | {'Rec':>6} | {'F1':>6}"
+        lines.append(header)
+        lines.append("-" * len(header))
+        for model_name, res in ht.items():
+            am = res.get("aggregate_metrics", {})
+            acc = am.get("accuracy", None)
+            prec = am.get("precision", None)
+            rec = am.get("recall", None)
+            f1 = am.get("f1", res.get("mean_cv_score", None))
+
+            def fmt(x):
+                return (
+                    f"{x:.4f}"
+                    if isinstance(x, (int, float)) and x is not None
+                    else "  NA  "
+                )
+
+            lines.append(
+                f"{model_name:30} | {fmt(acc)} | {fmt(prec)} | {fmt(rec)} | {fmt(f1)}"
+            )
+        lines.append("=" * 60)
+        out.write_text("\n".join(lines), encoding="utf-8")
+        print(f"\nSummary written to: {out}")
 
     def run_complete_pipeline(self):
         """Run the complete experimental pipeline."""
@@ -483,7 +459,12 @@ class ExperimentalPipeline:
             self.run_hyperparameter_tuning()
 
             # Step 4: Run learning curve experiments
-            # self.run_learning_curves()
+            if self.include_learning_curves:
+                self.run_learning_curves()
+            else:
+                print(
+                    "\n[info] Learning curves are disabled (set include_learning_curves=True to enable)."
+                )
 
             # Step 5: Create visualizations
             self.create_visualizations()
@@ -497,7 +478,8 @@ class ExperimentalPipeline:
 
 def main():
     """Main function to run the complete experimental pipeline."""
-    pipeline = ExperimentalPipeline(fast=False)
+    # fast=True keeps small grids/folds; learning curves disabled by default
+    pipeline = ExperimentalPipeline(fast=False, include_learning_curves=False)
     pipeline.run_complete_pipeline()
 
 

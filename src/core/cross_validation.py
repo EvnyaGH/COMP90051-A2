@@ -18,15 +18,11 @@ Requirements:
 
 import numpy as np
 import pandas as pd
-from typing import List, Tuple, Dict, Any, Callable, Union, Optional
+from typing import List, Tuple, Dict, Any, Callable
 from abc import ABC, abstractmethod
-import random
+import json, random
 from collections import Counter
-
-try:
-    from scipy.sparse import spmatrix
-except ImportError:
-    spmatrix = tuple()  # type: ignore
+from src.core.metrics import compute_all_metrics
 
 
 class BaseCrossValidator(ABC):
@@ -230,7 +226,13 @@ class NestedCrossValidator:
             y_inner_val = y_train[inner_val_idx]
 
             # Train model with these parameters
-            model = model_factory(params)
+            # Ensure tfidf_ngram is a tuple if it exists
+            model_params = params.copy()
+            if "tfidf_ngram" in model_params and isinstance(
+                model_params["tfidf_ngram"], list
+            ):
+                model_params["tfidf_ngram"] = tuple(model_params["tfidf_ngram"])
+            model = model_factory(model_params)
             model.fit(X_inner_train, y_inner_train)
 
             # Evaluate on inner validation set
@@ -281,9 +283,10 @@ class NestedCrossValidator:
         n_outer_folds = len(outer_splits)
 
         # Store results
-        cv_scores = []
-        param_scores = {str(params): [] for params in param_combinations}
-        best_params_per_fold = []
+        cv_scores: List[float] = []
+        fold_metrics: List[Dict[str, float]] = []
+        param_scores = {json.dumps(p, sort_keys=True): [] for p in param_combinations}
+        best_params_per_fold: List[Tuple[Dict[str, Any], float]] = []
 
         print(
             f"Starting nested CV: {n_outer_folds} outer folds, {self.inner_cv.n_splits} inner folds"
@@ -294,43 +297,72 @@ class NestedCrossValidator:
             print(f"\nOuter Fold {fold + 1}/{n_outer_folds}")
 
             # Evaluate each parameter combination
-            param_scores_fold = {}
+            param_scores_fold: Dict[str, float] = {}
             for i, params in enumerate(param_combinations):
                 print(f"  Testing params {i+1}/{len(param_combinations)}: {params}")
                 score = self._evaluate_params(
                     X, y, train_idx, val_idx, model_factory, params
                 )
-                param_scores_fold[str(params)] = score
-                param_scores[str(params)].append(score)
+                k = json.dumps(params, sort_keys=True)
+                param_scores_fold[k] = score
+                param_scores[k].append(score)
 
             # Find best parameters for this fold
-            best_params = max(param_scores_fold.items(), key=lambda x: x[1])
-            best_params_per_fold.append((eval(best_params[0]), best_params[1]))
+            best_k, best_score = max(param_scores_fold.items(), key=lambda x: x[1])
+            best_params_dict = json.loads(best_k)
+            best_params_per_fold.append((best_params_dict, best_score))
 
             # Evaluate best model on outer validation set
             X_val = self._get_subset(X, val_idx)
             y_val = y[val_idx]
 
-            best_model = model_factory(eval(best_params[0]))
-            best_model.fit(self._get_subset(X, train_idx), y[train_idx])
+            # Ensure tfidf_ngram is a tuple if it exists
+            final_params = best_params_dict.copy()
+            if "tfidf_ngram" in final_params and isinstance(
+                final_params["tfidf_ngram"], list
+            ):
+                final_params["tfidf_ngram"] = tuple(final_params["tfidf_ngram"])
+            best_model = model_factory(final_params)
+            X_train_outer = self._get_subset(X, train_idx)
+            y_train_outer = y[train_idx]
+            best_model.fit(X_train_outer, y_train_outer)
             y_pred = best_model.predict(X_val)
             fold_score = self.scoring_func(y_val, y_pred)
             cv_scores.append(fold_score)
+            fold_metrics.append(compute_all_metrics(y_val, y_pred))
 
-            print(f"  Best params: {eval(best_params[0])}")
+            print(f"  Best params: {best_params_dict}")
             print(f"  Fold score: {fold_score:.4f}")
 
         # Find overall best parameters (most frequently selected)
-        param_frequency = Counter([str(params) for params, _ in best_params_per_fold])
-        overall_best_params = eval(max(param_frequency.items(), key=lambda x: x[1])[0])
+        param_frequency = Counter(
+            [json.dumps(params, sort_keys=True) for params, _ in best_params_per_fold]
+        )
+        overall_best_params = json.loads(
+            max(param_frequency.items(), key=lambda x: x[1])[0]
+        )
+        # Convert lists back to tuples for specific parameters
+        if "tfidf_ngram" in overall_best_params and isinstance(
+            overall_best_params["tfidf_ngram"], list
+        ):
+            overall_best_params["tfidf_ngram"] = tuple(
+                overall_best_params["tfidf_ngram"]
+            )
 
         results = {
             "best_params": overall_best_params,
             "cv_scores": cv_scores,
-            "param_scores": param_scores,
-            "best_params_per_fold": best_params_per_fold,
             "mean_cv_score": np.mean(cv_scores),
             "std_cv_score": np.std(cv_scores),
+            "fold_metrics": fold_metrics,  # list of per-fold dicts
+            "aggregate_metrics": (
+                {
+                    k: float(np.mean([fm[k] for fm in fold_metrics]))
+                    for k in fold_metrics[0].keys()
+                }
+                if fold_metrics
+                else {}
+            ),
         }
 
         print(f"\nNested CV Results:")

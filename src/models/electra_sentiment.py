@@ -19,8 +19,6 @@ import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 from transformers import (
-    ElectraTokenizerFast,
-    ElectraForSequenceClassification,
     AutoTokenizer,
     AutoModelForSequenceClassification,
     get_linear_schedule_with_warmup,
@@ -54,7 +52,7 @@ class ElectraConfig:
     epochs: int = 3
     batch_size: int = 32
     max_len: int = 128
-    freeze_bottom_layers: int = 0
+    freeze_bottom_layers: int = 6
     use_amp: bool = torch.cuda.is_available()  # Only use AMP if CUDA is available
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
 

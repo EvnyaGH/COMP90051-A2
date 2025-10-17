@@ -31,50 +31,40 @@ from pathlib import Path
 
 HYPERPARAMETER_GRIDS: Dict[str, Dict[str, List[Any]]] = {
     "logistic_regression": {
-        "C": [0.1, 1.0, 10.0],
+        "C": [1.0, 10.0, 100.0],
         "solver": ["liblinear"],
-        "max_iter": [1000],
-        "tfidf_max_features": [50000],
-        "tfidf_ngram": [(1,2)],
+        "tfidf_max_features": [10000],
+        "tfidf_ngram": [(1, 1)],
     },
     "bilstm": {
         "hidden_dim": [64, 128, 256],
         "embedding_dim": [100],
-        "max_len": [256],
-        "epochs": [6],
-        "batch_size": [64],
         "lr": [1e-3],
         "dropout": [0.3],
     },
     "electra": {
-        "learning_rate": [2e-5, 3e-5, 5e-5],
+        "learning_rate": [3e-5, 5e-5, 7e-5],
         "epochs": [3],
         "batch_size": [32],
-        "max_len": [128],
     },
 }
 HYPERPARAMETER_GRIDS_FAST = {
     "logistic_regression": {
-        "C": [0.1, 1.0, 10.0],
+        "C": [1.0, 10.0, 100.0],
         "solver": ["liblinear"],
-        "max_iter": [500],
-        "tfidf_max_features": [20000],
-        "tfidf_ngram": [(1,1)],
+        "tfidf_max_features": [10000],
+        "tfidf_ngram": [(1, 1)],
     },
     "bilstm": {
         "hidden_dim": [64, 128, 256],
         "embedding_dim": [100],
-        "max_len": [192],
-        "epochs": [2],
-        "batch_size": [64],
         "lr": [1e-3],
         "dropout": [0.3],
     },
     "electra": {
-        "learning_rate": [2e-5, 3e-5, 5e-5],
+        "learning_rate": [3e-5, 5e-5, 7e-5],
         "epochs": [1],
         "batch_size": [32],
-        "max_len": [96],
         "model_name": ["google/electra-small-discriminator"],
     },
 }
@@ -167,12 +157,23 @@ class HyperparameterTuner:
             "best_params": cv_results["best_params"],
             "mean_cv_score": cv_results["mean_cv_score"],
             "std_cv_score": cv_results["std_cv_score"],
+            "aggregate_metrics": cv_results.get("aggregate_metrics", {}),
         }
 
-        print(f"\nBest parameters: {cv_results['best_params']}")
+        # summary line
+        am = self.results[model_name]["aggregate_metrics"]
+        f1 = am.get("f1_macro", self.results[model_name]["mean_cv_score"])
+        acc = am.get("accuracy", None)
+        prec = am.get("precision_macro", None)
+        rec = am.get("recall_macro", None)
+        print("\nBest parameters:", cv_results["best_params"])
         print(
-            f"Best CV score: {cv_results['mean_cv_score']:.4f} ± {cv_results['std_cv_score']:.4f}"
+            f"CV mean±std (F1): {cv_results['mean_cv_score']:.4f} ± {cv_results['std_cv_score']:.4f}"
         )
+        if all(v is not None for v in [acc, prec, rec, f1]):
+            print(
+                f"Metrics (mean over outer folds): Acc={acc:.4f}  P={prec:.4f}  R={rec:.4f}  F1={f1:.4f}"
+            )
 
         return cv_results
 
@@ -286,28 +287,6 @@ class HyperparameterTuner:
             self.results = json.load(f)
 
         print(f"Results loaded from: {filepath}")
-
-
-# # Predefined hyperparameter grids for common models
-# HYPERPARAMETER_GRIDS = {
-#     "logistic_regression": {
-#         "C": [0.01, 1.0, 100.0],
-#         "max_iter": [1000, 5000],
-#         "solver": ["liblinear", "lbfgs"],
-#     },
-#     "bilstm": {
-#         "hidden_dim": [64, 128, 256],
-#         "learning_rate": [0.001, 0.01, 0.1],
-#         "dropout": [0.2, 0.4, 0.6],
-#         "epochs": [10, 20, 50],
-#     },
-#     "electra": {
-#         "learning_rate": [1e-5, 2e-5, 5e-5],
-#         "batch_size": [8, 16, 32],
-#         "max_length": [128, 256, 512],
-#         "epochs": [2, 3, 5],
-#     },
-# }
 
 
 def create_hyperparameter_tuner(

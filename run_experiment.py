@@ -49,6 +49,11 @@ def main():
         help="Run in fast mode (reduced dataset, fewer CV folds, minimal hyperparameters)",
     )
     parser.add_argument(
+        "--include-learning-curves",
+        action="store_true",
+        help="Include learning curves in the experiment",
+    )
+    parser.add_argument(
         "--data-dir", default="data", help="Directory containing dataset files"
     )
     parser.add_argument(
