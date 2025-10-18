@@ -25,5 +25,7 @@ OUTPUTS
 - results/model_comparison.png (performance chart)
 - results/learning_curves.png (learning curves)
 - results/experiment_summary.txt (summary table)
+- results/confusion_matrices.png (confusion matrices)
+- results/model_summary.csv/md (detailed summary tables)
 
 For detailed documentation, see https://github.com/EvnyaGH/COMP90051-A2 README.md

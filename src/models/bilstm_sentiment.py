@@ -155,14 +155,14 @@ class BiLSTMClassifier(nn.Module):
 
 @dataclass
 class _Params:
-    max_len: int = 256
+    max_len: int = 128
     embedding_dim: int = 100
     hidden_dim: int = 128
     num_layers: int = 1
     dropout: float = 0.3
     lr: float = 1e-3
     batch_size: int = 64
-    epochs: int = 6
+    epochs: int = 3
     glove_path: Optional[str] = None
     use_w2v: bool = True
     min_freq: int = 1

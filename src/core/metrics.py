@@ -421,7 +421,9 @@ def classification_report(
     return report
 
 
-def compute_all_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> Dict[str, float]:
+def compute_all_metrics(
+    y_true: np.ndarray, y_pred: np.ndarray
+) -> Dict[str, Union[float, List]]:
     """
     Compute all standard classification metrics.
 
@@ -440,6 +442,9 @@ def compute_all_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> Dict[str, flo
         "precision_weighted": precision_score(y_true, y_pred, average="weighted"),
         "recall_weighted": recall_score(y_true, y_pred, average="weighted"),
         "f1_weighted": f1_score(y_true, y_pred, average="weighted"),
+        "confusion_matrix": confusion_matrix(
+            y_true, y_pred
+        ).tolist(),  # Convert to list for JSON serialization
     }
 
 
